@@ -5,17 +5,16 @@
 # calls and then holds an HTTP client is rejected, which is what makes the
 # four lines below worth reading before installing anything.
 
-name = ":author_username/:module_slug"
-framework = ">= 0.66"
+name = "hyz-is/rtc"
+framework = ">= 0.56"
 profiles = ["conventional", "performance"]
 
 [permissions]
-# It answers requests and reads its own rows. Nothing leaves the process.
-network = false
-# It keeps no state outside the database.
+# It answers browsers' WebSocket handshakes on the application's own listener.
+network = true
+# It keeps no state outside memory: a camera's picture group lives as long as its source.
 filesystem = false
-# It runs no other program.
+# It runs no other program: the process that reads the camera is the installer's.
 exec = false
-# module.go owns the skeletons table, so whoever installs this has to run
-# `aru migrate`. Declaring it is how they find that out before deploying.
-migrations = true
+# It owns no table.
+migrations = false

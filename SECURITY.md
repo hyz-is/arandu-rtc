@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-The latest minor release of :package_name receives security fixes. Older minor
+The latest minor release of Live receives security fixes. Older minor
 releases do not: a published Go module version is immutable, so a fix is a new
 release rather than a moved tag.
 
@@ -10,7 +10,7 @@ release rather than a moved tag.
 
 Report it privately, through GitHub's advisory form:
 
-<https://:module_path/security/advisories/new>
+<https://github.com/hyz-is/arandu-rtc/security/advisories/new>
 
 Do not open a public issue and do not describe the problem in a pull request.
 A report that arrives in public is a report every reader of this repository can
@@ -25,21 +25,20 @@ unless you ask not to be.
 
 ## What is in scope
 
-Anything that lets a caller reach data a policy did not authorize. In
-particular:
+Anything that lets somebody watch a camera the installer did not allow, or harm
+the process that reads one. In particular:
 
-- a path from a handler to a Model or database handle that does not pass through
-  the Service and its Policy;
-- a route reachable without `RequireAuth`, or a handler that takes who is
-  asking from anywhere but the subject the guard put on the request;
-- a Model terminal reached before `security.Authorize`;
-- a query whose tenant scope is disabled, or a tenant taken from anywhere but
-  `data.Tenant(g)`;
-- a `Grant` that can be produced without a policy returning nil;
-- a field reaching a response that `Resource` does not list.
+- a socket opened without a pass that `Signer.Verify` accepts for that camera;
+- a pass that opens a camera other than the one it names, or works after its
+  expiry, or is accepted when signed with another secret;
+- a page of an origin outside `ServerConfig.Origins` that opens the socket;
+- a viewer, however slow or hostile, that stalls the writer `Hub.Open` returns or
+  makes the hub hold more than its limits allow;
+- a stream of bytes written to the hub that panics it or exhausts its memory.
 
 ## What is not
 
 - A vulnerability in the framework itself. Report that to the framework.
-- A policy that is too permissive in an application that opened it. What this
-  package ships denies everything; what an application opens is its own.
+- An application that issues passes without asking its Policy first. What this
+  package ships checks the pass and the limits; who may be given one is the
+  application's.

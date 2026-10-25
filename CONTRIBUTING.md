@@ -18,46 +18,23 @@ The two filters on `gofmt` are not preference. `gofmt` is the only tool in the
 chain that ignores build tags, so it reads files the compiler deliberately
 excludes; `testdata/` holds fixtures that are invalid on purpose.
 
-A change to the entity in `model.go` is followed by `aru model:build`, which
-rewrites `SkeletonQuery.go`, and the regenerated file goes in the same commit.
-`aru model:build --check` exits 1 when the committed file is missing, stale or
-edited by hand.
-
 ## What a change has to keep true
 
-Four properties are the reason this package is what it is. A change that breaks
+Five properties are the reason this package is what it is. A change that breaks
 one of them will not be merged, whatever else it improves.
 
-1. **The policy denies by default.** No branch allows every action, and none is
-   added. Opening an action means writing the rule that opens it.
-2. **Every Service method authorizes before reaching the Model.** The Grant is
-   then required by the Model terminal; constructing `Skeletons(db)` first is
-   already the wrong order and the structural audit rejects it.
-3. **The tenant comes from `data.Tenant(g)`.** Not from the path, the body, the
-   query string or a header, on any code path, including the read paths.
-4. **`arandu.mod.toml` matches the code.** Adding an outbound call, a file
-   write or a process means declaring it there in the same commit.
+1. **Nothing waits for a viewer.** The writer `Hub.Open` returns never blocks and
+   never fails: the process behind the pipe would stall with it.
+2. **A socket opens only with a pass for that camera**, checked before the
+   upgrade.
+3. **A viewer starts on a keyframe**, and one that fell behind is skipped to the
+   next, never handed pictures that refer to ones it did not get.
+4. **The module needs no framework** and has one dependency.
+5. **`arandu.mod.toml` matches the code.** Adding a file write, a process or a
+   table means declaring it there in the same commit.
 
-CRUD stays on `Skeletons(db)` and its generated query. Add a Repository only for
-a specialized complex query, read model, report, export or raw SQL contract; a
-wrapper around `Find`, `Get`, `Save` or `Delete` is a second data path.
-
-Every query starts at `Skeletons(s.db)`. The constructor returns one mutable
-query, so a second chain begun from a value held in a variable carries the
-clauses of the first -- and that compiles.
-
-Model-backed entities stay pointers. A copy of `Skeleton` keeps the model of the
-row it was copied from, and the model refuses to write through the copy with
-`model.ErrUnwired`. Response resources are the deliberate snapshot boundary;
-Service results are not.
-
-The rules of the entity itself go in the custom block of `model.go`, as pure
-methods. The Service orchestrates, and holds no rule the entity could hold.
-
-Handlers read who is asking with `ctx.User()`, which `RequireAuth` filled, and
-return the error the Service returned for the router to answer. A handler that
-loads the session or maps an error to a status fails
-`TestHandlersLeaveTheSubjectAndTheStatusToTheFramework`.
+The hub stays a relay of compressed pictures. Decoding, encoding, recording, a
+table, a route or a policy belong to the application that installs it.
 
 ## Style
 
@@ -83,4 +60,4 @@ Do not open an issue. See [SECURITY.md](SECURITY.md).
 ## Licence
 
 By contributing you agree that your contribution is licensed under the MIT
-licence, the same as the rest of :module_path.
+licence, the same as the rest of github.com/hyz-is/arandu-rtc.
