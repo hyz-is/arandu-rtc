@@ -6,7 +6,7 @@ metadata:
   audience: app
 ---
 
-# Using Live
+# Using RTC
 
 Live video from the machine that reads the camera. The process that opens the
 camera (an engine running ffmpeg) already holds its compressed stream; it muxes

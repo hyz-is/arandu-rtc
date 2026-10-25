@@ -2,7 +2,7 @@
   <img src=".github/logo.svg" alt="Arandu" width="180">
 </p>
 
-# Arandu Live
+# Arandu RTC
 
 Live camera video for Arandu applications, served from the machine that reads the
 camera.

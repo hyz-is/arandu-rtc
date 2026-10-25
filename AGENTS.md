@@ -1,4 +1,4 @@
-# Working on Live
+# Working on RTC
 
 This is an Arandu package: a live video hub. The process that reads a camera
 writes a copy of its compressed stream, as fragmented MP4, to the hub; browsers

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-The latest minor release of Live receives security fixes. Older minor
+The latest minor release of RTC receives security fixes. Older minor
 releases do not: a published Go module version is immutable, so a fix is a new
 release rather than a moved tag.
 
