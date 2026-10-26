@@ -19,6 +19,8 @@ a release is corrected by another release and never by moving a tag.
 - `KindTile` marks the pass of a camera's small picture. `Verify` refuses it as it refuses a still's,
   and `ServerConfig.Kind` makes a Server take only the pass of one kind, so a node serves the live
   video and the tile on the same route from two hubs, each Server refusing the other's pass.
+- `ServerConfig.FullSignal` renames the state a viewer is told when the camera or the node has all
+  its viewers, for a hub of small pictures whose page answers "busy" by showing a still picture.
 - `ServerConfig.Sent` is called with the size of every message written to a browser, for a node's
   counter of what it sends.
 - `Config.Convert` decides which tracks the hub's Transcoder converts. Nil keeps the rule that

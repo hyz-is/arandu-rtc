@@ -114,6 +114,11 @@ type ServerConfig struct {
 	// WriteTimeout bounds one write. Zero takes DefaultWriteTimeout.
 	WriteTimeout time.Duration
 
+	// FullSignal is the state a viewer is told when the camera or the node has all the viewers it
+	// allows, in the "signal" message. Empty is "full". A hub of small pictures sets it to "busy",
+	// the one a page already answers by showing a still picture instead.
+	FullSignal string
+
 	// Sent, when set, is called with the size of every message written to a browser, for a node's
 	// counter of what it sends. It runs on the socket's writer, so it must not wait.
 	Sent func(bytes int)
@@ -133,6 +138,7 @@ type Server struct {
 	write      time.Duration
 	maxMessage int
 	sent       func(int)
+	full       string
 	log        *slog.Logger
 }
 
@@ -141,7 +147,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.Hub == nil || cfg.Signer == nil {
 		return nil, errors.New("live: a Server needs a Hub and a Signer")
 	}
-	s := &Server{hub: cfg.Hub, signer: cfg.Signer, kind: cfg.Kind, maxSession: cfg.MaxSession, ping: cfg.PingInterval, write: cfg.WriteTimeout, log: cfg.Logger, maxMessage: cfg.MaxMessage, sent: cfg.Sent}
+	s := &Server{hub: cfg.Hub, signer: cfg.Signer, kind: cfg.Kind, maxSession: cfg.MaxSession, ping: cfg.PingInterval, write: cfg.WriteTimeout, log: cfg.Logger, maxMessage: cfg.MaxMessage, sent: cfg.Sent, full: cfg.FullSignal}
 	for _, o := range cfg.Origins {
 		o = strings.TrimSpace(o)
 		if o == "" {
@@ -170,6 +176,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 	if s.maxMessage < MinMaxMessage {
 		return nil, fmt.Errorf("live: MaxMessage %d is below %d", s.maxMessage, MinMaxMessage)
+	}
+	if s.full == "" {
+		s.full = "full"
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -225,7 +234,7 @@ func (s *Server) Serve(w http.ResponseWriter, r *http.Request, camera string, at
 	if subErr != nil {
 		// Said in a message, not in a status: a browser cannot read the status of a refused
 		// handshake, and the page owes the person a sentence about why there is no picture.
-		state := "full"
+		state := s.full
 		if errors.Is(subErr, ErrBusy) {
 			state = "busy"
 		}

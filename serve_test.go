@@ -529,3 +529,20 @@ func TestTheServerCountsWhatItSends(t *testing.T) {
 		t.Errorf("counted %d bytes in %d messages, but the browser read %d bytes in 5", total, messages, received)
 	}
 }
+
+func TestAServerCanNameTheStateOfAFullCameraAndKeepsItsOtherAnswers(t *testing.T) {
+	r := newRig(t, rtc.ServerConfig{FullSignal: "busy"}, nil, rtc.Config{ViewersPerCamera: 1})
+	first, _, err := r.dial(t, "cam", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.CloseNow()
+	second, _, err := r.dial(t, "cam", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.CloseNow()
+	if _, b := read(t, second); string(b) != `{"type":"signal","state":"busy"}` {
+		t.Fatalf("a viewer turned away was sent %s, want busy", b)
+	}
+}
