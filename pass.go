@@ -37,6 +37,12 @@ const (
 	passDomain  = "arandu-rtc/pass/v1\n"
 )
 
+// KindSnapshot marks a pass that opens a camera's still picture and nothing else. A pass without a
+// kind is the live video's, and Verify refuses a snapshot pass, as VerifyKind refuses a video one:
+// the still picture is fetched by a page that may do it for dozens of cameras at once, and a pass
+// for it must not be good for a socket that carries the camera's whole stream.
+const KindSnapshot = "snapshot"
+
 // ErrPass is every reason a pass is refused. The caller gets one answer on purpose: which part was
 // wrong is a hint to somebody guessing.
 var ErrPass = errors.New("live: the pass is not valid")
@@ -50,6 +56,8 @@ type Claims struct {
 	Subject string
 	// Expires is the last instant the pass opens a socket.
 	Expires time.Time
+	// Kind is what the pass opens: empty for the live video, or a mark such as KindSnapshot.
+	Kind string
 }
 
 // Signer issues and verifies passes with one shared secret.
@@ -81,19 +89,46 @@ type passPayload struct {
 	C string `json:"c"`
 	S string `json:"s"`
 	E int64  `json:"e"`
+	// K is the kind, left out of a live video pass so that a pass written before kinds existed
+	// and one written now are the same bytes.
+	K string `json:"k,omitempty"`
 }
 
 // Issue writes a pass for camera, for subject, and says when it stops working.
 func (s *Signer) Issue(camera, subject string) (string, time.Time) {
+	return s.IssueKind("", camera, subject)
+}
+
+// IssueKind writes a pass of a kind, such as KindSnapshot. An empty kind is Issue's.
+func (s *Signer) IssueKind(kind, camera, subject string) (string, time.Time) {
 	expires := s.now().Add(s.ttl).Truncate(time.Second)
-	body, _ := json.Marshal(passPayload{V: passVersion, C: camera, S: subject, E: expires.Unix()})
+	body, _ := json.Marshal(passPayload{V: passVersion, C: camera, S: subject, E: expires.Unix(), K: kind})
 	encoded := base64.RawURLEncoding.EncodeToString(body)
 	return encoded + "." + base64.RawURLEncoding.EncodeToString(s.mac(encoded)), expires
 }
 
 // Verify reads a pass and checks it was issued by a Signer with this secret, for this camera,
-// and has not expired. Every failure is ErrPass.
+// and has not expired. Every failure is ErrPass. It is the live video's check: a pass of kind
+// KindSnapshot is refused, and any other mark is the application's to define and is accepted.
 func (s *Signer) Verify(pass, camera string) (Claims, error) {
+	claims, err := s.verify(pass, camera)
+	if err != nil || claims.Kind == KindSnapshot {
+		return Claims{}, ErrPass
+	}
+	return claims, nil
+}
+
+// VerifyKind is Verify for a pass of exactly this kind: a pass of any other kind, the live video's
+// included, is refused.
+func (s *Signer) VerifyKind(pass, camera, kind string) (Claims, error) {
+	claims, err := s.verify(pass, camera)
+	if err != nil || claims.Kind != kind {
+		return Claims{}, ErrPass
+	}
+	return claims, nil
+}
+
+func (s *Signer) verify(pass, camera string) (Claims, error) {
 	encoded, tag, found := cutLast(pass, '.')
 	if !found {
 		return Claims{}, ErrPass
@@ -114,7 +149,7 @@ func (s *Signer) Verify(pass, camera string) (Claims, error) {
 	if !s.now().Before(expires) {
 		return Claims{}, ErrPass
 	}
-	return Claims{Camera: p.C, Subject: p.S, Expires: expires}, nil
+	return Claims{Camera: p.C, Subject: p.S, Expires: expires, Kind: p.K}, nil
 }
 
 func (s *Signer) mac(encoded string) []byte {

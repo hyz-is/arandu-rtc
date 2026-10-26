@@ -8,6 +8,15 @@ the versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A published module version is immutable: Go serves it from the proxy forever, so
 a release is corrected by another release and never by moving a tag.
 
+## [Unreleased]
+
+### Added
+
+- A pass can carry a kind. `Signer.IssueKind` writes one, `Signer.VerifyKind` accepts only that kind,
+  and `KindSnapshot` marks the pass of a camera's still picture. `Verify` (the live video's check)
+  refuses a snapshot pass, so the pass of a page that fetches stills for many cameras does not open
+  a socket. A pass without a kind is byte for byte what it was.
+
 ## [0.1.1] - 2026-10-26
 
 ### Fixed

@@ -86,3 +86,32 @@ func TestASignerWantsASecretAndASaneLifetime(t *testing.T) {
 		t.Error("a pass of an hour was accepted: that is a session")
 	}
 }
+
+func TestASnapshotPassOpensTheStillAndNotTheVideo(t *testing.T) {
+	s, _ := rtc.NewSigner(secret, 0)
+	snap, _ := s.IssueKind(rtc.KindSnapshot, "cam-1", "account-9")
+	video, _ := s.Issue("cam-1", "account-9")
+
+	claims, err := s.VerifyKind(snap, "cam-1", rtc.KindSnapshot)
+	if err != nil || claims.Kind != rtc.KindSnapshot || claims.Subject != "account-9" {
+		t.Fatalf("snapshot pass: %+v, %v", claims, err)
+	}
+	if _, err := s.VerifyKind(snap, "cam-2", rtc.KindSnapshot); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("another camera: error %v, want ErrPass", err)
+	}
+	if _, err := s.Verify(snap, "cam-1"); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("a snapshot pass opened the video: error %v, want ErrPass", err)
+	}
+	if _, err := s.VerifyKind(video, "cam-1", rtc.KindSnapshot); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("a video pass opened the still: error %v, want ErrPass", err)
+	}
+	if c, err := s.Verify(video, "cam-1"); err != nil || c.Kind != "" {
+		t.Errorf("video pass: %+v, %v", c, err)
+	}
+	// The kind is inside what the tag covers: it cannot be added to, or taken off, a pass.
+	body, tag, _ := strings.Cut(snap, ".")
+	vbody, _, _ := strings.Cut(video, ".")
+	if _, err := s.Verify(vbody+"."+tag, "cam-1"); !errors.Is(err, rtc.ErrPass) || body == vbody {
+		t.Errorf("a video payload with a snapshot tag: error %v, want ErrPass", err)
+	}
+}
