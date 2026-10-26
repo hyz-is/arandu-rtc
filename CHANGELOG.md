@@ -8,6 +8,16 @@ the versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A published module version is immutable: Go serves it from the proxy forever, so
 a release is corrected by another release and never by moving a tag.
 
+## [Unreleased]
+
+### Fixed
+
+- A converted picture is dated when the camera's own picture reached the node, not when the
+  converter finished it. The conversion starts at a keyframe, so the first converted picture is
+  that keyframe's, and each later one is the camera's at the same distance from it. Boxes found on
+  the camera's frame carry the camera's time; a picture dated by the converter's clock was shown
+  with the boxes of a moment later, about 400 ms in the measurement on a 2560x1440 HEVC camera.
+
 ## [0.1.0] - 2026-10-25
 
 ### Added

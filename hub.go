@@ -150,6 +150,15 @@ type camera struct {
 	rawGOP  [][]byte
 	rawFeed *rawFeed
 
+	// clock is when each picture of the camera's own stream reached the node, by its presentation
+	// time, while the camera is being converted. A converted picture is dated from it (see
+	// nativeWall), so what the viewer is shown is dated when the camera sent it and not when the
+	// converter finished it.
+	clock []stamp
+	// rawGOPPTS is the presentation time of the first picture of rawGOP, the keyframe a conversion
+	// can start at.
+	rawGOPPTS time.Duration
+
 	job        *job
 	idle       *time.Timer
 	derivedGen uint64
@@ -157,6 +166,38 @@ type camera struct {
 	ending *time.Timer
 
 	subs map[*Subscription]struct{}
+}
+
+// stamp is when one picture of the camera's stream reached the node.
+type stamp struct {
+	pts  time.Duration
+	wall time.Time
+}
+
+// maxClock is how many pictures of the camera's own stream are remembered for dating the converted
+// ones, a few minutes of any camera.
+const maxClock = 4096
+
+// nativeWall is when the camera's own picture at pts reached the node: the nearest one remembered,
+// and the distance to it added. It says false when none is within a second.
+func (c *camera) nativeWall(pts time.Duration) (time.Time, bool) {
+	best, bestDiff := -1, time.Second+1
+	for i := len(c.clock) - 1; i >= 0; i-- {
+		d := c.clock[i].pts - pts
+		if d < 0 {
+			d = -d
+		}
+		if d < bestDiff {
+			best, bestDiff = i, d
+		}
+		if c.clock[i].pts < pts-time.Second {
+			break
+		}
+	}
+	if best < 0 {
+		return time.Time{}, false
+	}
+	return c.clock[best].wall.Add(pts - c.clock[best].pts), true
 }
 
 // view is the stream viewers are given.
@@ -175,9 +216,15 @@ type job struct {
 
 // rawFeed hands the camera's container to a transcoder: the init segment and the group of
 // pictures in progress first, then every fragment as it arrives.
+//
+// The converter starts at the first keyframe it is given, so that is the camera's picture the first
+// converted picture is (anchor): fragments before one are not fed, and a converted picture at t,
+// counted from the first one the converter wrote, is the camera's at anchor + t.
 type rawFeed struct {
-	ch     chan []byte
-	closed bool
+	ch       chan []byte
+	closed   bool
+	anchor   time.Duration
+	anchored bool
 }
 
 func (f *rawFeed) offer(b []byte) {
@@ -270,9 +317,15 @@ type source struct {
 	failed     bool
 	once       sync.Once
 
+	// A converted stream knows the feed it answers, and the time of the first picture it wrote.
+	feed  *rawFeed
+	p0    time.Duration
+	p0Set bool
+
 	// The fragment being read: what its first picture was, and the header that came before its data.
 	fragSamples int
 	fragKey     bool
+	fragPTS     time.Duration
 	moof        []byte
 	// ftyp is the file's first box, which comes before anybody knows what the stream is.
 	ftyp []byte
@@ -399,7 +452,7 @@ func (s *source) onTrack(t Track) {
 		return
 	}
 	c.native = stream{track: &t}
-	c.rawInit, c.rawGOP = nil, nil
+	c.rawInit, c.rawGOP, c.clock = nil, nil, nil
 	c.transcode = h.cfg.Transcoder != nil && !browserDecodes(t.Codec)
 	if c.transcode {
 		// Viewers wait for the converted picture; the conversion starts when the container's header
@@ -420,7 +473,7 @@ func (s *source) onSample(sample Sample) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if s.fragSamples == 0 {
-		s.fragKey = sample.Key
+		s.fragKey, s.fragPTS = sample.Key, sample.PTS
 	}
 	s.fragSamples++
 	c := s.heard()
@@ -432,6 +485,16 @@ func (s *source) onSample(sample Sample) {
 		if c.derived.track == nil {
 			return
 		}
+		// The converter's picture is dated when the camera's was, not when the converter was
+		// done with it: boxes found on the camera's frame are dated by the camera's clock.
+		if !s.p0Set {
+			s.p0, s.p0Set = sample.PTS, true
+		}
+		if s.feed != nil && s.feed.anchored {
+			if wall, ok := c.nativeWall(s.feed.anchor + sample.PTS - s.p0); ok {
+				sample.Wall = wall
+			}
+		}
 		c.derived.add(sp, h.cfg.GOPBytes)
 		for sub := range c.subs {
 			sub.offer(sp)
@@ -442,6 +505,12 @@ func (s *source) onSample(sample Sample) {
 		return
 	}
 	c.native.add(sp, h.cfg.GOPBytes)
+	if c.transcode {
+		c.clock = append(c.clock, stamp{pts: sample.PTS, wall: sample.Wall})
+		if len(c.clock) > maxClock {
+			c.clock = append(c.clock[:0], c.clock[len(c.clock)-maxClock/2:]...)
+		}
+	}
 	if !c.transcode {
 		for sub := range c.subs {
 			sub.offer(sp)
@@ -482,12 +551,19 @@ func (s *source) onBox(kind string, box []byte) {
 		s.moof = nil
 		if s.fragKey {
 			c.rawGOP = c.rawGOP[:0:0]
+			c.rawGOPPTS = s.fragPTS
 		}
 		if len(c.rawGOP) == 0 && !s.fragKey {
 			return // a group that did not begin here cannot be started from
 		}
 		c.rawGOP = append(c.rawGOP, fragment)
 		if f := c.rawFeed; f != nil {
+			if !f.anchored {
+				if !s.fragKey {
+					return // the converter starts on a keyframe
+				}
+				f.anchor, f.anchored = s.fragPTS, true
+			}
 			f.offer(fragment)
 		}
 	}
@@ -666,9 +742,13 @@ func (h *Hub) run(ctx context.Context, c *camera, j *job, track Track) {
 		for _, f := range c.rawGOP {
 			feed.ch <- f
 		}
+		if len(c.rawGOP) > 0 {
+			feed.anchor, feed.anchored = c.rawGOPPTS, true
+		}
 		c.rawFeed = feed
 		h.sources++
 		out := h.newSource(c.id, h.sources, true)
+		out.feed = feed
 		c.derivedGen = out.generation
 		c.derived.reset()
 		h.mu.Unlock()

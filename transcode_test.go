@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -298,5 +299,113 @@ func TestTheSocketSaysStartingThenGivesTheConvertedPictureAndSaysBusyWhenFull(t 
 	defer two.CloseNow()
 	if _, b := read(t, two); string(b) != `{"type":"signal","state":"busy"}` {
 		t.Fatalf("a camera the node cannot convert: %s, want busy", b)
+	}
+}
+
+// timedConverter is a converter that takes its time: it answers the H.264 fixture only when told,
+// as a transcoder that finishes a picture long after the camera sent it.
+type timedConverter struct {
+	release chan struct{}
+	started chan struct{}
+}
+
+func (c *timedConverter) Transcode(ctx context.Context, camera, codec string, width, height int, in io.Reader, out io.Writer) error {
+	close(c.started)
+	go func() { _, _ = io.Copy(io.Discard, in) }()
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	h264, _ := os.ReadFile("testdata/h264.mp4")
+	for len(h264) > 0 {
+		n := min(1400, len(h264))
+		_, _ = out.Write(h264[:n])
+		h264 = h264[n:]
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func boxesOf(data []byte) [][]byte {
+	var out [][]byte
+	for len(data) >= 8 {
+		n := int(data[0])<<24 | int(data[1])<<16 | int(data[2])<<8 | int(data[3])
+		out = append(out, data[:n])
+		data = data[n:]
+	}
+	return out
+}
+
+// What the viewer is shown is dated when the camera sent it, not when the converter finished it:
+// the boxes the engine found on a frame carry the time of that frame, and a picture dated by the
+// converter's clock would be shown with the boxes of a moment later.
+func TestAConvertedPictureIsDatedWhenTheCameraSentIt(t *testing.T) {
+	var mu sync.Mutex
+	clock := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
+	now := func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	advance := func(d time.Duration) { mu.Lock(); clock = clock.Add(d); mu.Unlock() }
+
+	conv := &timedConverter{release: make(chan struct{}), started: make(chan struct{})}
+	h := rtc.NewHub(rtc.Config{Transcoder: conv, Now: now})
+	v, err := h.Subscribe("cam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	src := h.Open("cam")
+
+	// The camera's pictures arrive in fragments a tenth of a second apart; what the hub should
+	// remember of each is when its fragment arrived, less the picture time between it and the
+	// fragment's last picture.
+	start := now()
+	native := map[time.Duration]time.Time{}
+	var first time.Duration
+	var haveFirst bool
+	var inFragment []rtc.Sample
+	shadow := rtc.NewDemuxer(nil, func(s rtc.Sample) { inFragment = append(inFragment, s) })
+	for _, box := range boxesOf(clip(t, "h265.mp4")) {
+		if string(box[4:8]) == "moof" {
+			advance(100 * time.Millisecond)
+		}
+		inFragment = nil
+		_, _ = shadow.Write(box)
+		_, _ = src.Write(box)
+		if len(inFragment) > 0 {
+			last := inFragment[len(inFragment)-1].PTS
+			if !haveFirst {
+				first, haveFirst = inFragment[0].PTS, true
+			}
+			for _, sm := range inFragment {
+				native[sm.PTS] = now().Add(-(last - sm.PTS))
+			}
+		}
+	}
+	<-conv.started
+	// The converter finishes the first picture seven tenths of a second after the camera sent the last.
+	advance(700 * time.Millisecond)
+	close(conv.release)
+
+	var converted []rtc.Sample
+	until(t, "the converted pictures arrive", func() bool {
+		for _, e := range pending(v) {
+			if e.Sample != nil {
+				converted = append(converted, *e.Sample)
+			}
+		}
+		return len(converted) >= 20
+	})
+	for i := 0; i < 20; i++ {
+		// The converter's pictures come in the order they were shown (the fixture has no reordering);
+		// the camera's picture at the same time of the programme is the one to compare with.
+		// The converter counts from its first picture, which is the camera's first keyframe.
+		want, ok := native[first+converted[i].PTS]
+		if !ok {
+			t.Fatalf("converted picture %d at %s has no picture of the camera at that time", i, converted[i].PTS)
+		}
+		if d := converted[i].Wall.Sub(want); d < -time.Millisecond || d > time.Millisecond {
+			t.Errorf("converted picture %d (at %s) is dated %s from the camera's own, %s after the start: want the same instant",
+				i, converted[i].PTS, d, converted[i].Wall.Sub(start))
+		}
 	}
 }
