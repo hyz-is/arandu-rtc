@@ -16,6 +16,18 @@ a release is corrected by another release and never by moving a tag.
   and `KindSnapshot` marks the pass of a camera's still picture. `Verify` (the live video's check)
   refuses a snapshot pass, so the pass of a page that fetches stills for many cameras does not open
   a socket. A pass without a kind is byte for byte what it was.
+- `KindTile` marks the pass of a camera's small picture. `Verify` refuses it as it refuses a still's,
+  and `ServerConfig.Kind` makes a Server take only the pass of one kind, so a node serves the live
+  video and the tile on the same route from two hubs, each Server refusing the other's pass.
+- `Config.Convert` decides which tracks the hub's Transcoder converts. Nil keeps the rule that
+  converts what is not H.264; a hub of small pictures also converts an H.264 picture that is too
+  large or too fast.
+
+### Changed
+
+- A pass with a kind is version 2 and one without is still version 1. A node that predates kinds
+  reads only version 1, so it refuses a still's or a tile's pass and does not take it for the live
+  video's. Publish this version to the nodes before the application issues passes with a kind.
 
 ## [0.1.1] - 2026-10-26
 

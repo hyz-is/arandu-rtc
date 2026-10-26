@@ -77,6 +77,11 @@ to it, its H.264 output is what viewers get, and it stops a few seconds after th
 The package runs no program itself; the transcoder is the installer's (arandu-alpr's `transcode`
 runs ffmpeg on the card's encoder or the CPU). An H.264 camera is handed on untouched.
 
+A node that also shows a grid of small pictures runs a second hub for them, with `Config.Convert`
+telling it which tracks to convert: an H.264 picture that is too large or too fast too, not only
+what a browser cannot decode. Its Server has `ServerConfig.Kind` set to `KindTile`, takes only a
+pass issued with `Signer.IssueKind(KindTile, ...)`, and the live video's Server refuses that pass.
+
 ## What it does not do
 
 No recording, no HLS, no table, no route and no policy, and no conversion of its own. Audio is not

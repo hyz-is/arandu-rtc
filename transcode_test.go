@@ -409,3 +409,55 @@ func TestAConvertedPictureIsDatedWhenTheCameraSentIt(t *testing.T) {
 		}
 	}
 }
+
+func TestAHubThatSetsConvertConvertsAnH264PictureThatIsTooLarge(t *testing.T) {
+	f := newFake(t)
+	var asked []string
+	var mu sync.Mutex
+	h := rtc.NewHub(rtc.Config{
+		Transcoder: f, MaxTranscodes: 1, TranscodeIdle: 150 * time.Millisecond,
+		// The fixture is 160x120 H.264; "too large" here is anything over 100 pixels wide.
+		Convert: func(camera string, tr rtc.Track) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			asked = append(asked, camera)
+			return tr.Width > 100
+		},
+	})
+	v, err := h.Subscribe("cam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	feed(t, h.Open("cam"), clip(t, "h264.mp4"), 1500)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if started, _, _ := f.counts(); started == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if started, _, _ := f.counts(); started != 1 {
+		t.Fatalf("an H.264 picture the hub is told to convert started %d conversions", started)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(asked) != 1 || asked[0] != "cam" {
+		t.Errorf("Convert was asked %v, want once for cam", asked)
+	}
+}
+
+func TestAHubThatSetsConvertLeavesAnH265PictureItSaysFits(t *testing.T) {
+	f := newFake(t)
+	h := rtc.NewHub(rtc.Config{Transcoder: f, Convert: func(string, rtc.Track) bool { return false }})
+	v, _ := h.Subscribe("cam")
+	defer v.Close()
+	hevc(t, h, "cam")
+	time.Sleep(100 * time.Millisecond)
+	if started, _, _ := f.counts(); started != 0 {
+		t.Errorf("a picture Convert said fits started %d conversions", started)
+	}
+	if got := h.State("cam"); got != "live" {
+		t.Errorf("state %q, want live: the picture is handed on as it is", got)
+	}
+}

@@ -457,3 +457,38 @@ func TestTheLimitsDoNotDependOnTheClientAddress(t *testing.T) {
 		t.Fatal("a third viewer with a new address was let in")
 	}
 }
+
+// A node runs two Servers on /live/{camera}: the live video's, and the tile's on a hub of its own.
+// Each takes only the pass of its kind.
+func TestAServerOfAKindTakesOnlyThePassOfThatKind(t *testing.T) {
+	tile := newRig(t, rtc.ServerConfig{Kind: rtc.KindTile}, nil)
+	video := newRig(t, rtc.ServerConfig{}, nil)
+
+	dial := func(r *rig, kind string) error {
+		pass, _ := r.signer.IssueKind(kind, "cam", "account-1")
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		c, resp, err := websocket.Dial(ctx, r.url("cam", pass), nil)
+		if err == nil {
+			_ = c.CloseNow()
+		} else if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("kind %q refused with %v, want 401", kind, resp)
+		}
+		return err
+	}
+	if err := dial(tile, rtc.KindTile); err != nil {
+		t.Errorf("the tile server refused a tile pass: %v", err)
+	}
+	if err := dial(tile, ""); err == nil {
+		t.Error("the tile server took a live video pass")
+	}
+	if err := dial(tile, rtc.KindSnapshot); err == nil {
+		t.Error("the tile server took a snapshot pass")
+	}
+	if err := dial(video, ""); err != nil {
+		t.Errorf("the video server refused a video pass: %v", err)
+	}
+	if err := dial(video, rtc.KindTile); err == nil {
+		t.Error("the video server took a tile pass")
+	}
+}

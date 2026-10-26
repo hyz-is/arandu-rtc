@@ -92,6 +92,11 @@ type ServerConfig struct {
 	Hub    *Hub
 	Signer *Signer
 
+	// Kind is the kind of pass this Server opens: empty for the live video's, or KindTile and
+	// the like for a Server that serves a hub of its own. A pass of any other kind is 401, which
+	// is how a node runs two Servers on one route and tells them apart by the pass.
+	Kind string
+
 	// Origins are the pages that may open the socket, as origins (https://alpr.sh) or hosts. A
 	// page of any other origin is refused. Empty checks none, which is safe only because the pass
 	// is what guards the socket, and the browser cannot attach one on its own.
@@ -117,6 +122,7 @@ type ServerConfig struct {
 type Server struct {
 	hub        *Hub
 	signer     *Signer
+	kind       string
 	origins    []string
 	maxSession time.Duration
 	ping       time.Duration
@@ -130,7 +136,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.Hub == nil || cfg.Signer == nil {
 		return nil, errors.New("live: a Server needs a Hub and a Signer")
 	}
-	s := &Server{hub: cfg.Hub, signer: cfg.Signer, maxSession: cfg.MaxSession, ping: cfg.PingInterval, write: cfg.WriteTimeout, log: cfg.Logger, maxMessage: cfg.MaxMessage}
+	s := &Server{hub: cfg.Hub, signer: cfg.Signer, kind: cfg.Kind, maxSession: cfg.MaxSession, ping: cfg.PingInterval, write: cfg.WriteTimeout, log: cfg.Logger, maxMessage: cfg.MaxMessage}
 	for _, o := range cfg.Origins {
 		o = strings.TrimSpace(o)
 		if o == "" {
@@ -180,7 +186,15 @@ type Attach func(claims Claims) (messages <-chan []byte, detach func())
 // read the status of a handshake and the page has a sentence to say. The pass is read from the "pass" query parameter, because a browser cannot set a
 // header on a WebSocket handshake.
 func (s *Server) Serve(w http.ResponseWriter, r *http.Request, camera string, attach Attach) {
-	claims, err := s.signer.Verify(r.URL.Query().Get("pass"), camera)
+	var (
+		claims Claims
+		err    error
+	)
+	if s.kind == "" {
+		claims, err = s.signer.Verify(r.URL.Query().Get("pass"), camera)
+	} else {
+		claims, err = s.signer.VerifyKind(r.URL.Query().Get("pass"), camera, s.kind)
+	}
 	if err != nil {
 		refuse(w, http.StatusUnauthorized, "pass")
 		return

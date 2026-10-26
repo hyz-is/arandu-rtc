@@ -63,6 +63,12 @@ type Config struct {
 	// Transcoder converts a camera whose codec is not H.264. Nil leaves such a camera as it is,
 	// and a browser that cannot decode it says so.
 	Transcoder Transcoder
+	// Convert says whether a camera's track is converted by the Transcoder. Nil converts what a
+	// browser may not decode, which is every track that is not H.264. A hub that serves a small
+	// picture of its own sets it to convert also an H.264 picture that is too large or too fast; it
+	// is called with the camera's id and the track its reader announced, while the hub holds its
+	// lock, so it must be quick and must not call the hub. It only matters with a Transcoder.
+	Convert func(camera string, track Track) bool
 	// MaxTranscodes is how many cameras may be converted at once on this node. Zero is one.
 	// A viewer of one more is told the node is busy (ErrBusy).
 	MaxTranscodes int
@@ -306,6 +312,15 @@ func browserDecodes(codec string) bool {
 	return strings.HasPrefix(codec, "avc1.") || strings.HasPrefix(codec, "avc3.")
 }
 
+// converts says whether the track is converted: Config.Convert's answer, or whether a browser may
+// not decode it.
+func (h *Hub) converts(camera string, t Track) bool {
+	if h.cfg.Convert != nil {
+		return h.cfg.Convert(camera, t)
+	}
+	return !browserDecodes(t.Codec)
+}
+
 // source is one run of a camera's reader, or one run of its transcoder: the writer it writes the
 // container to.
 type source struct {
@@ -453,7 +468,7 @@ func (s *source) onTrack(t Track) {
 	}
 	c.native = stream{track: &t}
 	c.rawInit, c.rawGOP, c.clock = nil, nil, nil
-	c.transcode = h.cfg.Transcoder != nil && !browserDecodes(t.Codec)
+	c.transcode = h.cfg.Transcoder != nil && h.converts(c.id, t)
 	if c.transcode {
 		// Viewers wait for the converted picture; the conversion starts when the container's header
 		// is in (onBox), if anybody is there to see it.

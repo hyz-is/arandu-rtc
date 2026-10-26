@@ -1,6 +1,8 @@
 package rtc_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -113,5 +115,73 @@ func TestASnapshotPassOpensTheStillAndNotTheVideo(t *testing.T) {
 	vbody, _, _ := strings.Cut(video, ".")
 	if _, err := s.Verify(vbody+"."+tag, "cam-1"); !errors.Is(err, rtc.ErrPass) || body == vbody {
 		t.Errorf("a video payload with a snapshot tag: error %v, want ErrPass", err)
+	}
+}
+
+func TestATilePassOpensTheTileAndNotTheVideoOrTheStill(t *testing.T) {
+	s, _ := rtc.NewSigner(secret, 0)
+	tile, _ := s.IssueKind(rtc.KindTile, "cam-1", "account-9")
+	video, _ := s.Issue("cam-1", "account-9")
+	snap, _ := s.IssueKind(rtc.KindSnapshot, "cam-1", "account-9")
+
+	claims, err := s.VerifyKind(tile, "cam-1", rtc.KindTile)
+	if err != nil || claims.Kind != rtc.KindTile || claims.Subject != "account-9" {
+		t.Fatalf("tile pass: %+v, %v", claims, err)
+	}
+	if _, err := s.VerifyKind(tile, "cam-2", rtc.KindTile); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("another camera: error %v, want ErrPass", err)
+	}
+	if _, err := s.Verify(tile, "cam-1"); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("a tile pass opened the video: error %v, want ErrPass", err)
+	}
+	if _, err := s.VerifyKind(video, "cam-1", rtc.KindTile); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("a video pass opened the tile: error %v, want ErrPass", err)
+	}
+	if _, err := s.VerifyKind(snap, "cam-1", rtc.KindTile); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("a snapshot pass opened the tile: error %v, want ErrPass", err)
+	}
+	if _, err := s.VerifyKind(tile, "cam-1", rtc.KindSnapshot); !errors.Is(err, rtc.ErrPass) {
+		t.Errorf("a tile pass opened the still: error %v, want ErrPass", err)
+	}
+}
+
+// A node that predates kinds reads version 1 only and, finding no kind in its payload struct, would
+// take a pass that carries one for the live video's. A pass with a kind is version 2 so that it
+// does not.
+func TestAPassWithAKindIsVersionTwoAndOneWithoutIsVersionOne(t *testing.T) {
+	s, _ := rtc.NewSigner(secret, 0)
+	version := func(pass string) (v int, kind string) {
+		body, _, _ := strings.Cut(pass, ".")
+		raw, err := base64.RawURLEncoding.DecodeString(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p struct {
+			V int    `json:"v"`
+			K string `json:"k"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.V, p.K
+	}
+	video, _ := s.Issue("cam-1", "x")
+	tile, _ := s.IssueKind(rtc.KindTile, "cam-1", "x")
+	if v, k := version(video); v != 1 || k != "" {
+		t.Errorf("video pass is version %d kind %q", v, k)
+	}
+	if v, k := version(tile); v != 2 || k != rtc.KindTile {
+		t.Errorf("tile pass is version %d kind %q", v, k)
+	}
+
+	// Neither can be turned into the other: the tag covers the payload.
+	forge := func(v int, k string) string {
+		raw, _ := json.Marshal(map[string]any{"v": v, "c": "cam-1", "s": "x", "e": time.Now().Add(time.Minute).Unix(), "k": k})
+		return base64.RawURLEncoding.EncodeToString(raw) + ".AAAA"
+	}
+	for _, p := range []string{forge(2, ""), forge(1, rtc.KindTile)} {
+		if _, err := s.Verify(p, "cam-1"); !errors.Is(err, rtc.ErrPass) {
+			t.Errorf("%s: error %v, want ErrPass", p, err)
+		}
 	}
 }
