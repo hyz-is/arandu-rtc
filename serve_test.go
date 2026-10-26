@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -490,5 +491,41 @@ func TestAServerOfAKindTakesOnlyThePassOfThatKind(t *testing.T) {
 	}
 	if err := dial(video, rtc.KindTile); err == nil {
 		t.Error("the video server took a tile pass")
+	}
+}
+
+func TestTheServerCountsWhatItSends(t *testing.T) {
+	var mu sync.Mutex
+	var total, messages int
+	r := newRig(t, rtc.ServerConfig{Sent: func(n int) { mu.Lock(); total += n; messages++; mu.Unlock() }}, nil)
+	src := r.hub.Open("cam")
+	data := clip(t, "h264.mp4")
+	feed(t, src, data, 1000)
+
+	conn, _, err := r.dial(t, "cam", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	var received int
+	for i := 0; i < 5; i++ { // the track, then the group in progress
+		_, b := read(t, conn)
+		received += len(b)
+	}
+	// The count follows the write by an instant, and the browser may have read the message first.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		done := messages >= 5 && total >= received
+		mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if messages < 5 || total < received {
+		t.Errorf("counted %d bytes in %d messages, but the browser read %d bytes in 5", total, messages, received)
 	}
 }

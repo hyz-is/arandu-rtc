@@ -114,6 +114,10 @@ type ServerConfig struct {
 	// WriteTimeout bounds one write. Zero takes DefaultWriteTimeout.
 	WriteTimeout time.Duration
 
+	// Sent, when set, is called with the size of every message written to a browser, for a node's
+	// counter of what it sends. It runs on the socket's writer, so it must not wait.
+	Sent func(bytes int)
+
 	Logger *slog.Logger
 }
 
@@ -128,6 +132,7 @@ type Server struct {
 	ping       time.Duration
 	write      time.Duration
 	maxMessage int
+	sent       func(int)
 	log        *slog.Logger
 }
 
@@ -136,7 +141,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.Hub == nil || cfg.Signer == nil {
 		return nil, errors.New("live: a Server needs a Hub and a Signer")
 	}
-	s := &Server{hub: cfg.Hub, signer: cfg.Signer, kind: cfg.Kind, maxSession: cfg.MaxSession, ping: cfg.PingInterval, write: cfg.WriteTimeout, log: cfg.Logger, maxMessage: cfg.MaxMessage}
+	s := &Server{hub: cfg.Hub, signer: cfg.Signer, kind: cfg.Kind, maxSession: cfg.MaxSession, ping: cfg.PingInterval, write: cfg.WriteTimeout, log: cfg.Logger, maxMessage: cfg.MaxMessage, sent: cfg.Sent}
 	for _, o := range cfg.Origins {
 		o = strings.TrimSpace(o)
 		if o == "" {
@@ -326,13 +331,21 @@ func (s *Server) pump(ctx context.Context, conn *websocket.Conn, sub *Subscripti
 func (s *Server) text(ctx context.Context, conn *websocket.Conn, msg []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, s.write)
 	defer cancel()
-	return conn.Write(ctx, websocket.MessageText, msg)
+	err := conn.Write(ctx, websocket.MessageText, msg)
+	if err == nil && s.sent != nil {
+		s.sent(len(msg))
+	}
+	return err
 }
 
 func (s *Server) binary(ctx context.Context, conn *websocket.Conn, msg []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, s.write)
 	defer cancel()
-	return conn.Write(ctx, websocket.MessageBinary, msg)
+	err := conn.Write(ctx, websocket.MessageBinary, msg)
+	if err == nil && s.sent != nil {
+		s.sent(len(msg))
+	}
+	return err
 }
 
 func trackMessage(t Track) []byte {
