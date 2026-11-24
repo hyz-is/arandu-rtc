@@ -578,7 +578,6 @@ func (d *Demuxer) data(mdat []byte) error {
 		return 0
 	}
 	last := pts(run[len(run)-1])
-	scale := time.Duration(d.track.Timescale)
 	for _, s := range run {
 		// A sample's offset counts from the fragment header's first byte, and the data box
 		// follows the header directly, behind its own eight bytes.
@@ -589,11 +588,26 @@ func (d *Demuxer) data(mdat []byte) error {
 		if d.onSample != nil {
 			d.onSample(Sample{
 				Key:  s.flags&sampleNotSync == 0,
-				PTS:  time.Duration(pts(s)) * time.Second / scale,
-				Wall: now.Add(-time.Duration(last-pts(s)) * time.Second / scale),
+				PTS:  ticksToDuration(pts(s), d.track.Timescale),
+				Wall: now.Add(-ticksToDuration(last-pts(s), d.track.Timescale)),
 				Data: append([]byte(nil), mdat[start:start+s.size]...),
 			})
 		}
 	}
 	return nil
+}
+
+// ticksToDuration converts a count of the track's timescale ticks to a time.Duration.
+//
+// Multiplying the ticks by time.Second before dividing overflows a Duration (int64 nanoseconds)
+// once the ticks pass about 9.2e9, which at the 90 kHz of a camera is 28.5 hours of one stream:
+// the picture time then wrapped to a negative number and, written to the socket as an unsigned
+// one, no browser could take it. The whole seconds and the remainder are converted apart, and the
+// remainder is under one second of ticks, so it cannot overflow.
+func ticksToDuration(ticks int64, timescale uint32) time.Duration {
+	if timescale == 0 {
+		return 0
+	}
+	scale := int64(timescale)
+	return time.Duration(ticks/scale)*time.Second + time.Duration(ticks%scale*int64(time.Second)/scale)
 }

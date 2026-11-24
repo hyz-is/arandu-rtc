@@ -8,6 +8,18 @@ the versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A published module version is immutable: Go serves it from the proxy forever, so
 a release is corrected by another release and never by moving a tag.
 
+## [Unreleased]
+
+### Fixed
+
+- A sample's picture time overflowed after 28.5 hours of one stream. The Demuxer converted ticks to a
+  `time.Duration` by multiplying by a second before dividing, which passes an int64 of nanoseconds at
+  about 9.2e9 ticks (28.5 hours at 90 kHz). The time wrapped to a negative number and the socket
+  wrote it as an unsigned 64-bit one, which a browser's `EncodedVideoChunk` refuses (a TypeError:
+  "outside the 'long long' value range"), so every viewer of a camera whose stream had run that long
+  saw "the browser could not decode the video". The seconds and the remainder are converted apart.
+  A page that reads the time as a signed 64-bit number also survives a node that still has the fault.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added
