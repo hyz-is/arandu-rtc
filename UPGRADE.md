@@ -1,5 +1,10 @@
 # Upgrade Guide
 
+## v0.2.1
+
+Nothing to change. A stream that runs longer than 28.5 hours no longer sends a negative picture
+time (which a browser refused), so a node only needs the new version; no API changed.
+
 ## v0.2.0
 
 Almost nothing to change. A pass without a kind is byte for byte what it was and `Verify` still

@@ -10,6 +10,8 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-24
+
 ### Fixed
 
 - A sample's picture time overflowed after 28.5 hours of one stream. The Demuxer converted ticks to a
